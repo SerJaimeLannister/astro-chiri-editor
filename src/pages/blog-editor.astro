@@ -1,0 +1,241 @@
+---
+// Blog editor page
+export const prerender = false;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blog Editor</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .editor-container {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+      }
+      input[type="text"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 16px;
+        box-sizing: border-box;
+      }
+      .status {
+        margin-top: 10px;
+        padding: 10px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+      .status.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .status.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+      .status.info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+      }
+      .manual-save {
+        margin-top: 10px;
+        padding: 10px 20px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .manual-save:hover {
+        background: #0056b3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="editor-container">
+      <h1>Blog Post Editor</h1>
+      
+      <div class="form-group">
+        <label for="title">Post Title:</label>
+        <input type="text" id="title" placeholder="Enter your post title" />
+      </div>
+      
+      <div class="form-group">
+        <label for="filename">Filename (optional):</label>
+        <input type="text" id="filename" placeholder="Will auto-generate from title if empty" />
+      </div>
+      
+      <div class="form-group">
+        <label for="editor">Content:</label>
+        <textarea id="editor"></textarea>
+      </div>
+      
+      <button class="manual-save" id="manual-save">Save Now (Ctrl+S)</button>
+      <div id="status" class="status" style="display: none;"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+    <script>
+      let easyMDE;
+      let autoSaveInterval;
+      
+      // Initialize EasyMDE
+      document.addEventListener('DOMContentLoaded', function() {
+        easyMDE = new EasyMDE({
+          element: document.getElementById('editor'),
+          autofocus: true,
+          spellChecker: false,
+          placeholder: "Write your blog post in Markdown...",
+          toolbar: [
+            "bold", "italic", "heading", "|",
+            "quote", "code", "link", "image", "|",
+            "unordered-list", "ordered-list", "|",
+            "preview", "side-by-side", "fullscreen"
+          ],
+          status: ["autosave", "lines", "words", "cursor"]
+        });
+        
+        // Start auto-save after editor is ready
+        startAutoSave();
+        
+        // Manual save button
+        document.getElementById('manual-save').addEventListener('click', savePost);
+        
+        // Ctrl+S shortcut
+        document.addEventListener('keydown', function(e) {
+          if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            savePost();
+          }
+        });
+      });
+      
+      function startAutoSave() {
+        // Auto-save every 10 seconds
+        autoSaveInterval = setInterval(function() {
+          const title = document.getElementById('title').value.trim();
+          const content = easyMDE.value().trim();
+          
+          if (title && content) {
+            savePost(true); // true = auto-save
+          }
+        }, 10000);
+      }
+      
+      async function savePost(isAutoSave = false) {
+        const titleInput = document.getElementById('title');
+        const filenameInput = document.getElementById('filename');
+        const statusDiv = document.getElementById('status');
+        
+        const title = titleInput.value.trim();
+        const customFilename = filenameInput.value.trim();
+        const content = easyMDE.value().trim();
+        
+        if (!title) {
+          showStatus('Please enter a post title', 'error');
+          return;
+        }
+        
+        if (!content) {
+          showStatus('Please write some content', 'error');
+          return;
+        }
+        
+        // Generate filename from title if not provided
+        const filename = customFilename || generateFilename(title);
+        
+        if (!filename) {
+          showStatus('Invalid filename generated', 'error');
+          return;
+        }
+        
+        // Create frontmatter
+        const today = new Date();
+        const dateString = today.getFullYear() + '-' + 
+          String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+          String(today.getDate()).padStart(2, '0');
+        
+        const frontmatter = `---
+title: '${title}'
+pubDate: '${dateString}'
+---
+
+`;
+        
+        const fullContent = frontmatter + content;
+        
+        try {
+          const response = await fetch('/api/save-post', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              filename: filename,
+              content: fullContent
+            })
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            const saveType = isAutoSave ? 'Auto-saved' : 'Saved';
+            showStatus(`${saveType} as ${result.filename} at ${new Date().toLocaleTimeString()}`, 'success');
+          } else {
+            const errorData = await response.json();
+            showStatus(`Error: ${errorData.error || 'Unknown error'}`, 'error');
+          }
+        } catch (error) {
+          showStatus(`Network error: ${error.message}`, 'error');
+        }
+      }
+      
+      function generateFilename(title) {
+        return title
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '') // Remove special chars
+          .replace(/\s+/g, '-') // Replace spaces with hyphens
+          .replace(/-+/g, '-') // Replace multiple hyphens with single
+          .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
+      }
+      
+      function showStatus(message, type) {
+        const statusDiv = document.getElementById('status');
+        statusDiv.textContent = message;
+        statusDiv.className = `status ${type}`;
+        statusDiv.style.display = 'block';
+        
+        // Hide success messages after 3 seconds
+        if (type === 'success') {
+          setTimeout(() => {
+            statusDiv.style.display = 'none';
+          }, 3000);
+        }
+      }
+    </script>
+  </body>
+</html>
